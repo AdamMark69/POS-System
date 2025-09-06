@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d6efd">>
+  <meta charset="UTF-8">
+  <title>My POS System</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      background: #f4f4f4;
+    }
+    header {
+      background: #4CAF50;
+      color: white;
+      padding: 15px;
+      text-align: center;
+      font-size: 20px;
+    }
+    nav {
+      display: flex;
+      background: #333;
+    }
+    nav button {
+      flex: 1;
+      padding: 15px;
+      border: none;
+      background: #333;
+      color: white;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    nav button.active {
+      background: #4CAF50;
+    }
+    .container {
+      padding: 20px;
+    }
+    .hidden { display: none; }
+
+    /* Products grid */
+    .products {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 15px;
+    }
+    .product {
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .product:hover {
+      background: #e8f5e9;
+    }
+
+    /* Cart */
+    .cart-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: white;
+      padding: 10px;
+      border-radius: 5px;
+      margin-bottom: 5px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .remove-btn {
+      background: #e74c3c;
+      border: none;
+      color: white;
+      padding: 5px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* Totals & buttons */
+    .total { font-size: 18px; font-weight: bold; margin-top: 10px; text-align: right; }
+    button.action {
+      width: 100%;
+      padding: 15px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      color: white;
+      cursor: pointer;
+    }
+    #closeShopBtn { background: #4CAF50; }
+    #resetBtn { background: #e74c3c; }
+    #downloadPDF { background: #2196F3; }
+
+    /* Product Manager */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+      background: white;
+    }
+    table, th, td {
+      border: 1px solid #ddd;
+    }
+    th, td {
+      padding: 8px;
+      text-align: center;
+    }
+    th { background: #f2f2f2; }
+
+    /* Report */
+    #report {
+      margin-top: 20px;
+      padding: 15px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+  <header id="shopNameHeader">My Shop</header>
+  <nav>
+    <button id="posTab" class="active" onclick="showTab('pos')">POS</button>
+    <button id="managerTab" onclick="showTab('manager')">Product Manager</button>
+  </nav>
+
+  <!-- POS Mode -->
+  <div id="pos" class="container">
+    <h2>Menu</h2>
+    <div class="products" id="products"></div>
+
+    <h2>Cart</h2>
+    <div id="cart"></div>
+    <div class="total" id="total">Total: RM0</div>
+
+    <button id="closeShopBtn" class="action" onclick="closeShop()">Close Shop (See Report)</button>
+    <button id="resetBtn" class="action" onclick="resetShop()">Reset Shop (Clear All Data)</button>
+    <div id="report"></div>
+  </div>
+
+  <!-- Product Manager -->
+  <div id="manager" class="container hidden">
+    <h2>Shop Settings</h2>
+    <label>Shop Name: <input type="text" id="shopNameInput"></label>
+    <button class="action" style="background:#4CAF50" onclick="saveShopName()">Save Shop Name</button>
+
+    <h2>Add Product</h2>
+    <label>Name: <input type="text" id="newName"></label>
+    <label> Price: <input type="number" id="newPrice" step="0.01"></label>
+    <label> Cost: <input type="number" id="newCost" step="0.01"></label>
+    <button class="action" style="background:#4CAF50" onclick="addProduct()">Add Product</button>
+
+    <h2>Product List</h2>
+    <table id="productTable">
+      <tr><th>Name</th><th>Price</th><th>Cost</th><th>Actions</th></tr>
+    </table>
+  </div>
+
+  <script>
+    const { jsPDF } = window.jspdf;
+
+    // Load saved data
+    let products = JSON.parse(localStorage.getItem("products")) || [
+      { name: "Nasi Lemak", price: 5, cost: 3 },
+      { name: "Teh Tarik", price: 2, cost: 1 }
+    ];
+    let cart = JSON.parse(localStorage.getItem("cart")) || [];
+    let totals = JSON.parse(localStorage.getItem("totals")) || { sales:0, cost:0 };
+    let shopName = localStorage.getItem("shopName") || "My Shop";
+
+    document.getElementById("shopNameHeader").innerText = shopName;
+    document.getElementById("shopNameInput").value = shopName;
+
+    // Switch tabs
+    function showTab(tab) {
+      document.getElementById("pos").classList.add("hidden");
+      document.getElementById("manager").classList.add("hidden");
+      document.getElementById(tab).classList.remove("hidden");
+      document.getElementById("posTab").classList.remove("active");
+      document.getElementById("managerTab").classList.remove("active");
+      if(tab==="pos") document.getElementById("posTab").classList.add("active");
+      else document.getElementById("managerTab").classList.add("active");
+      if(tab==="manager") renderProductTable();
+    }
+
+    // Render products in POS
+    function renderProducts() {
+      const div = document.getElementById("products");
+      div.innerHTML = "";
+      products.forEach((p,i)=>{
+        const el = document.createElement("div");
+        el.className="product";
+        el.innerHTML = `${p.name}<br>RM${p.price}`;
+        el.onclick=()=>addToCart(i);
+        div.appendChild(el);
+      });
+    }
+
+    // Add to cart
+    function addToCart(i){
+      let item = cart.find(c=>c.name===products[i].name);
+      if(item){ item.qty++; }
+      else { cart.push({ ...products[i], qty:1 }); }
+      totals.sales += products[i].price;
+      totals.cost += products[i].cost;
+      saveData();
+      renderCart();
+    }
+
+    // Render cart
+    function renderCart(){
+      const div = document.getElementById("cart");
+      div.innerHTML="";
+      cart.forEach((c,i)=>{
+        const row=document.createElement("div");
+        row.className="cart-item";
+        row.innerHTML=`
+          <span>${c.name} x${c.qty} - RM${(c.price*c.qty).toFixed(2)}</span>
+          <button class="remove-btn" onclick="removeFromCart(${i})">❌</button>
+        `;
+        div.appendChild(row);
+      });
+      document.getElementById("total").innerText = "Total: RM"+totals.sales.toFixed(2);
+    }
+
+    // Remove item
+    function removeFromCart(i){
+      totals.sales -= cart[i].price*cart[i].qty;
+      totals.cost -= cart[i].cost*cart[i].qty;
+      cart.splice(i,1);
+      saveData();
+      renderCart();
+    }
+
+    // Close shop report
+    function closeShop(){
+      let report = `
+        <h3>${shopName} - Closing Report</h3>
+        <p>Date: ${new Date().toLocaleString()}</p>
+        <table border="1" cellspacing="0" cellpadding="5" width="100%">
+          <tr><th>Product</th><th>Qty</th><th>Sales</th><th>Cost</th><th>Profit</th></tr>
+      `;
+      let totalProfit=0;
+      cart.forEach(c=>{
+        let sales=c.price*c.qty;
+        let cost=c.cost*c.qty;
+        let profit=sales-cost;
+        totalProfit+=profit;
+        report+=`<tr><td>${c.name}</td><td>${c.qty}</td><td>RM${sales.toFixed(2)}</td><td>RM${cost.toFixed(2)}</td><td>RM${profit.toFixed(2)}</td></tr>`;
+      });
+      report+=`</table>
+        <p><b>Total Sales:</b> RM${totals.sales.toFixed(2)}<br>
+        <b>Total Cost:</b> RM${totals.cost.toFixed(2)}<br>
+        <b>Total Profit:</b> RM${totalProfit.toFixed(2)}</p>
+        <button id="downloadPDF" class="action" onclick="downloadPDF()">Download PDF</button>
+      `;
+      document.getElementById("report").innerHTML=report;
+    }
+
+    // Download PDF
+    function downloadPDF(){
+      const doc = new jsPDF();
+      doc.setFontSize(14);
+      doc.text(`${shopName} - Closing Report`, 14, 20);
+      doc.setFontSize(10);
+      doc.text(`Date: ${new Date().toLocaleString()}`,14,28);
+
+      let rows=[];
+      let totalProfit=0;
+      cart.forEach(c=>{
+        let sales=c.price*c.qty;
+        let cost=c.cost*c.qty;
+        let profit=sales-cost;
+        totalProfit+=profit;
+        rows.push([c.name, c.qty, "RM"+sales.toFixed(2), "RM"+cost.toFixed(2), "RM"+profit.toFixed(2)]);
+      });
+
+      doc.autoTable({
+        head:[["Product","Qty","Sales","Cost","Profit"]],
+        body:rows,
+        startY:35,
+        theme:"grid"
+      });
+
+      let finalY = doc.lastAutoTable.finalY+10;
+      doc.text(`Total Sales: RM${totals.sales.toFixed(2)}`,14,finalY);
+      doc.text(`Total Cost: RM${totals.cost.toFixed(2)}`,14,finalY+7);
+      doc.text(`Total Profit: RM${totalProfit.toFixed(2)}`,14,finalY+14);
+
+      doc.save(`${shopName}_Report.pdf`);
+    }
+
+    // Reset shop
+    function resetShop(){
+      cart=[]; totals={sales:0,cost:0};
+      saveData();
+      renderCart();
+      document.getElementById("report").innerHTML="";
+    }
+
+    // Save & load
+    function saveData(){
+      localStorage.setItem("products",JSON.stringify(products));
+      localStorage.setItem("cart",JSON.stringify(cart));
+      localStorage.setItem("totals",JSON.stringify(totals));
+      localStorage.setItem("shopName",shopName);
+    }
+
+    // Product Manager
+    function renderProductTable(){
+      const table=document.getElementById("productTable");
+      table.innerHTML="<tr><th>Name</th><th>Price</th><th>Cost</th><th>Actions</th></tr>";
+      products.forEach((p,i)=>{
+        table.innerHTML+=`
+          <tr>
+            <td><input value="${p.name}" onchange="editProduct(${i},'name',this.value)"></td>
+            <td><input type="number" step="0.01" value="${p.price}" onchange="editProduct(${i},'price',this.value)"></td>
+            <td><input type="number" step="0.01" value="${p.cost}" onchange="editProduct(${i},'cost',this.value)"></td>
+            <td><button onclick="deleteProduct(${i})">Delete</button></td>
+          </tr>
+        `;
+      });
+    }
+    function addProduct(){
+      const name=document.getElementById("newName").value;
+      const price=parseFloat(document.getElementById("newPrice").value);
+      const cost=parseFloat(document.getElementById("newCost").value);
+      if(name && price && cost){
+        products.push({name,price,cost});
+        document.getElementById("newName").value="";
+        document.getElementById("newPrice").value="";
+        document.getElementById("newCost").value="";
+        saveData();
+        renderProducts();
+        renderProductTable();
+      }
+    }
+    function editProduct(i,field,value){
+      products[i][field]= field==="name"? value: parseFloat(value);
+      saveData();
+      renderProducts();
+    }
+    function deleteProduct(i){
+      products.splice(i,1);
+      saveData();
+      renderProducts();
+      renderProductTable();
+    }
+    function saveShopName(){
+      shopName=document.getElementById("shopNameInput").value;
+      document.getElementById("shopNameHeader").innerText=shopName;
+      saveData();
+    }
+
+    // init
+    renderProducts();
+    renderCart();
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js");
+  }
+</script>
+</body>
+</html>
